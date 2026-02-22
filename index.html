@@ -301,7 +301,7 @@
 </div>
 
 <!-- ── SCRIPTS ── -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://unpkg.com/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════
 //  CONFIG  — change SERVER_URL to your Railway/Render URL
@@ -341,9 +341,41 @@ const connectedUsers = {};
 const ICE_SERVERS = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" }
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    // TURN via TCP port 443 — atraviesa casi cualquier firewall/NAT
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    },
+    // Backup TURN — numb.viagenie.ca
+    {
+      urls: "turn:numb.viagenie.ca",
+      username: "webrtc@live.com",
+      credential: "muazkh"
+    }
   ]
 };
+
+// Si STUN+TURN fallan (Edge Tracking Prevention), forzar solo TURN (relay)
+const ICE_SERVERS_RELAY_ONLY = {
+  iceServers: ICE_SERVERS.iceServers.filter(s => s.urls.toString().startsWith("turn:")),
+  iceTransportPolicy: "relay"
+};
+
+let useRelayOnly = false; // se activa si el primer intento falla
 
 // ── Fetch room info ──────────────────────────────────────────
 async function loadRoomInfo() {
@@ -497,11 +529,17 @@ window.toggleLocalMute = function(uid) {
 };
 
 // ── WebRTC helpers ───────────────────────────────────────────
+// Buffer ICE candidates that arrive before remote description is set
+const iceCandidateBuffers = {};
+
 async function createPeer(targetId, initiator) {
   if (peers[targetId]) return peers[targetId];
 
-  const pc = new RTCPeerConnection(ICE_SERVERS);
+  const config = useRelayOnly ? ICE_SERVERS_RELAY_ONLY : ICE_SERVERS;
+  const pc = new RTCPeerConnection(config);
+  console.log(`[PEER ${targetId}] creating (relay-only: ${useRelayOnly})`);
   peers[targetId] = pc;
+  iceCandidateBuffers[targetId] = [];
 
   // Add local tracks
   if (localStream) {
@@ -510,15 +548,20 @@ async function createPeer(targetId, initiator) {
 
   // Receive remote audio
   pc.ontrack = (e) => {
+    console.log(`[PEER ${targetId}] got remote track`);
     let audio = document.getElementById("audio_" + targetId);
     if (!audio) {
       audio = document.createElement("audio");
-      audio.id = "audio_" + targetId;
+      audio.id       = "audio_" + targetId;
       audio.autoplay = true;
+      // Required on some browsers to allow autoplay
+      audio.setAttribute("playsinline", "");
       document.getElementById("audioContainer").appendChild(audio);
     }
     audio.srcObject = e.streams[0];
     audio.volume    = calcVolume(positions[myId], positions[targetId]);
+    // Force play in case autoplay was blocked
+    audio.play().catch(err => console.warn("Audio play blocked:", err));
   };
 
   // ICE candidates
@@ -529,16 +572,48 @@ async function createPeer(targetId, initiator) {
   };
 
   pc.onconnectionstatechange = () => {
-    console.log(`[PEER ${targetId}] ${pc.connectionState}`);
+    const state = pc.connectionState;
+    console.log(`[PEER ${targetId}] ${state}`);
+    if (state === "failed") {
+      console.warn(`[PEER ${targetId}] connection failed, switching to relay-only and retrying...`);
+      useRelayOnly = true;
+      pc.close();
+      delete peers[targetId];
+      delete iceCandidateBuffers[targetId];
+      setTimeout(() => {
+        if (connectedUsers[targetId]?.connected) {
+          const initiate = myId < targetId;
+          createPeer(targetId, initiate);
+        }
+      }, 1500);
+    }
+  };
+
+  pc.onicegatheringstatechange = () => {
+    console.log(`[ICE ${targetId}] gathering: ${pc.iceGatheringState}`);
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    console.log(`[ICE ${targetId}] connection: ${pc.iceConnectionState}`);
   };
 
   if (initiator) {
-    const offer = await pc.createOffer();
+    const offer = await pc.createOffer({ offerToReceiveAudio: true });
     await pc.setLocalDescription(offer);
     socket.emit("signal", { to: targetId, type: "offer", data: offer });
   }
 
   return pc;
+}
+
+// Flush buffered ICE candidates after remote description is set
+async function flushIceCandidates(targetId) {
+  const pc  = peers[targetId];
+  const buf = iceCandidateBuffers[targetId] || [];
+  for (const candidate of buf) {
+    try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
+  }
+  iceCandidateBuffers[targetId] = [];
 }
 
 // ── Mic toggle ───────────────────────────────────────────────
@@ -616,15 +691,26 @@ document.getElementById("joinBtn").addEventListener("click", async () => {
     if (type === "offer") {
       pc = await createPeer(from, false);
       await pc.setRemoteDescription(new RTCSessionDescription(data));
-      const answer = await pc.createAnswer();
+      await flushIceCandidates(from);
+      const answer = await pc.createAnswer({ offerToReceiveAudio: true });
       await pc.setLocalDescription(answer);
       socket.emit("signal", { to: from, type: "answer", data: answer });
 
     } else if (type === "answer") {
-      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(data));
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(data));
+        await flushIceCandidates(from);
+      }
 
     } else if (type === "ice") {
-      if (pc) await pc.addIceCandidate(new RTCIceCandidate(data));
+      if (!pc) return;
+      // If remote description not set yet, buffer the candidate
+      if (!pc.remoteDescription || !pc.remoteDescription.type) {
+        if (!iceCandidateBuffers[from]) iceCandidateBuffers[from] = [];
+        iceCandidateBuffers[from].push(data);
+      } else {
+        try { await pc.addIceCandidate(new RTCIceCandidate(data)); } catch(e) {}
+      }
     }
   });
 
