@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Roblox Voice Chat</title>
+<style>
+  :root {
+    --bg:       #12121A;
+    --panel:    #18181F;
+    --card:     #1E1E2A;
+    --blue:     #0078C8;
+    --cyan:     #00C8FF;
+    --green:    #14A050;
+    --red:      #B41E1E;
+    --text:     #FFFFFF;
+    --sub:      #8C8CA0;
+    --border:   #2A2A40;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* ── HEADER ── */
+  header {
+    width: 100%;
+    background: var(--blue);
+    padding: 0 24px;
+    height: 54px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+  }
+  header::after {
+    content:'';
+    position:absolute;
+    bottom:0; left:0;
+    width:100%; height:4px;
+    background: var(--cyan);
+  }
+  header h1 { font-size:18px; font-weight:700; }
+  header span { font-size:13px; color: rgba(255,255,255,.6); }
+
+  /* ── JOIN SCREEN ── */
+  #joinScreen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 20px;
+    padding: 40px 20px;
+  }
+  .join-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 36px 40px;
+    width: 100%;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    align-items: center;
+  }
+  .join-card h2 { font-size:22px; }
+  .join-card p  { color: var(--sub); font-size:13px; text-align:center; line-height:1.6; }
+  .big-btn {
+    width: 100%;
+    padding: 14px;
+    background: var(--blue);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+  }
+  .big-btn::before {
+    content:'';
+    position:absolute;
+    top:0; left:0;
+    width:100%; height:4px;
+    background: var(--cyan);
+  }
+  .big-btn:hover { background: #0068b0; }
+  .big-btn:disabled { background:#333; cursor:default; }
+  .status-dot {
+    width:10px; height:10px;
+    border-radius:50%;
+    background: var(--sub);
+    display: inline-block;
+    margin-right: 6px;
+  }
+  .status-dot.green  { background: var(--green); box-shadow:0 0 6px #14A050; }
+  .status-dot.red    { background: var(--red); }
+  .status-dot.yellow { background: #CCA000; }
+
+  /* ── MAIN APP ── */
+  #appScreen { display:none; width:100%; max-width:700px; padding:20px; flex-direction:column; gap:16px; }
+
+  /* toolbar */
+  .toolbar {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius:6px;
+    padding: 12px 16px;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .toolbar-btn {
+    padding: 8px 18px;
+    border-radius:4px;
+    border: none;
+    font-size:13px;
+    font-weight:700;
+    cursor:pointer;
+    position:relative;
+    overflow:hidden;
+  }
+  .toolbar-btn::before {
+    content:'';
+    position:absolute;
+    top:0; left:0;
+    width:100%; height:3px;
+  }
+  .btn-mute   { background: var(--card); color:#fff; }
+  .btn-mute::before   { background: #555; }
+  .btn-mute.active    { background: var(--red); }
+  .btn-mute.active::before { background: #ff8080; }
+  .btn-leave  { background: var(--red); color:#fff; margin-left:auto; }
+  .btn-leave::before  { background: #ff8080; }
+
+  .server-info { color: var(--sub); font-size:12px; }
+  .server-info strong { color: var(--cyan); }
+
+  /* players grid */
+  .section-title {
+    font-size:12px;
+    color: var(--sub);
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    margin-bottom:4px;
+  }
+
+  #playerList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .player-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius:6px;
+    padding: 12px 16px;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    position:relative;
+    overflow:hidden;
+  }
+  .player-card::before {
+    content:'';
+    position:absolute;
+    left:0; top:0;
+    width:3px; height:100%;
+    background: var(--blue);
+  }
+  .player-card.speaking::before { background: var(--green); }
+  .player-card.muted-card::before { background: var(--red); }
+
+  .player-avatar {
+    width:40px; height:40px;
+    border-radius:50%;
+    background: var(--blue);
+    display:flex; align-items:center; justify-content:center;
+    font-size:18px;
+    flex-shrink:0;
+  }
+  .player-name  { font-weight:700; font-size:14px; }
+  .player-dist  { font-size:12px; color: var(--sub); margin-top:2px; }
+  .player-vol   {
+    font-size:11px;
+    color: var(--cyan);
+    margin-top:2px;
+  }
+
+  .player-actions { margin-left:auto; display:flex; gap:8px; }
+  .p-btn {
+    padding:5px 12px;
+    font-size:12px;
+    font-weight:700;
+    border:none;
+    border-radius:3px;
+    cursor:pointer;
+  }
+  .p-btn-mute   { background:#2A2A40; color:#fff; }
+  .p-btn-mute.on { background: var(--red); }
+
+  .vol-bar-wrap {
+    width:60px; height:6px;
+    background: #2A2A40;
+    border-radius:3px;
+    overflow:hidden;
+  }
+  .vol-bar-fill {
+    height:100%;
+    background: var(--cyan);
+    border-radius:3px;
+    transition: width .1s;
+  }
+
+  /* ME card */
+  .me-badge {
+    font-size:10px;
+    background: var(--blue);
+    color:#fff;
+    border-radius:3px;
+    padding:1px 5px;
+    margin-left:6px;
+    vertical-align:middle;
+  }
+
+  /* empty state */
+  .empty { color: var(--sub); font-size:13px; padding:20px 0; text-align:center; }
+
+  /* mic permission banner */
+  #permBanner {
+    background: #2A2000;
+    border: 1px solid #CCA000;
+    border-radius:6px;
+    padding:10px 16px;
+    font-size:13px;
+    color:#FFD050;
+    display:none;
+  }
+
+  /* connection status bar */
+  #statusBar {
+    font-size:12px;
+    color: var(--sub);
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🎙 Roblox Proximity Voice</h1>
+  <span>by u10</span>
+</header>
+
+<!-- ── JOIN SCREEN ── -->
+<div id="joinScreen">
+  <div class="join-card">
+    <div style="font-size:48px">🎮</div>
+    <h2>Join Voice Chat</h2>
+    <p id="joinInfo">Loading room info...</p>
+    <div id="statusBar">
+      <span class="status-dot" id="connDot"></span>
+      <span id="connText">Connecting...</span>
+    </div>
+    <button class="big-btn" id="joinBtn" disabled>Join Voice Chat</button>
+    <p style="font-size:11px;color:var(--sub)">Your microphone will be requested after joining.</p>
+  </div>
+</div>
+
+<!-- ── APP SCREEN ── -->
+<div id="appScreen" style="display:none; flex-direction:column;">
+  <div id="permBanner">⚠️ Microphone access is required for voice chat.</div>
+
+  <div class="toolbar">
+    <button class="toolbar-btn btn-mute" id="muteBtn">🎙 Mic ON</button>
+    <div class="server-info">
+      Server: <strong id="infoJobId">—</strong> &nbsp;|&nbsp;
+      You: <strong id="infoName">—</strong>
+    </div>
+    <button class="toolbar-btn btn-leave" id="leaveBtn">✕ Leave</button>
+  </div>
+
+  <p class="section-title">Players in this server</p>
+  <div id="playerList"><p class="empty">No other players connected.</p></div>
+
+  <!-- Hidden audio elements injected here -->
+  <div id="audioContainer" style="display:none"></div>
+</div>
+
+<!-- ── SCRIPTS ── -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  CONFIG  — change SERVER_URL to your Railway/Render URL
+// ═══════════════════════════════════════════════════════════════
+const SERVER_URL = "https://YOUR-APP.railway.app"; // ← CHANGE THIS
+
+// ── Proximity settings ───────────────────────────────────────
+const MAX_DIST  = 60;   // studs — beyond this, volume = 0
+const MIN_DIST  = 5;    // studs — closer than this, volume = 1
+
+// ═══════════════════════════════════════════════════════════════
+const token = new URLSearchParams(location.search).get("t");
+
+if (!token) {
+  document.getElementById("joinInfo").textContent = "❌ Invalid URL — no token found.";
+} 
+
+// ── State ────────────────────────────────────────────────────
+let socket      = null;
+let localStream = null;
+let myId        = null;
+let myJobId     = null;
+let myName      = null;
+let isMuted     = false;
+let roomData    = null;
+
+// peerConnections[robloxUserId] = RTCPeerConnection
+const peers     = {};
+// mutedLocally[robloxUserId] = bool
+const localMutes = {};
+// positions[robloxUserId] = {x,y,z}
+const positions  = {};
+// connected status
+const connectedUsers = {};
+
+// ── ICE servers (free STUN) ──────────────────────────────────
+const ICE_SERVERS = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" }
+  ]
+};
+
+// ── Fetch room info ──────────────────────────────────────────
+async function loadRoomInfo() {
+  try {
+    const res  = await fetch(`${SERVER_URL}/room/${token}`);
+    if (!res.ok) throw new Error("Room not found");
+    roomData = await res.json();
+
+    myId    = roomData.robloxUserId;
+    myJobId = roomData.jobId;
+    myName  = roomData.displayName;
+
+    document.getElementById("joinInfo").innerHTML =
+      `<b>${myName}</b>, you're joining server <b>${myJobId.slice(0,8)}…</b><br>
+       ${roomData.players.length} player(s) in this server.`;
+
+    setConnDot("yellow", "Room found — click Join");
+    document.getElementById("joinBtn").disabled = false;
+  } catch(e) {
+    document.getElementById("joinInfo").textContent = "❌ " + e.message;
+    setConnDot("red", "Error loading room");
+  }
+}
+
+// ── UI helpers ───────────────────────────────────────────────
+function setConnDot(color, text) {
+  const dot  = document.getElementById("connDot");
+  const span = document.getElementById("connText");
+  dot.className  = "status-dot " + color;
+  span.textContent = text;
+}
+
+function showApp() {
+  document.getElementById("joinScreen").style.display = "none";
+  const app = document.getElementById("appScreen");
+  app.style.display    = "flex";
+  app.style.flexDirection = "flex";
+
+  document.getElementById("infoJobId").textContent = myJobId.slice(0,12) + "…";
+  document.getElementById("infoName").textContent  = myName;
+}
+
+// ── Distance / Volume ────────────────────────────────────────
+function calcVolume(myPos, otherPos) {
+  if (!myPos || !otherPos) return 0;
+  const dx = myPos.x - otherPos.x;
+  const dy = myPos.y - otherPos.y;
+  const dz = myPos.z - otherPos.z;
+  const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+  if (dist >= MAX_DIST) return 0;
+  if (dist <= MIN_DIST) return 1;
+  return 1 - (dist - MIN_DIST) / (MAX_DIST - MIN_DIST);
+}
+
+function calcDist(myPos, otherPos) {
+  if (!myPos || !otherPos) return null;
+  const dx = myPos.x - otherPos.x;
+  const dy = myPos.y - otherPos.y;
+  const dz = myPos.z - otherPos.z;
+  return Math.sqrt(dx*dx + dy*dy + dz*dz).toFixed(1);
+}
+
+// ── Update player list UI ────────────────────────────────────
+function renderPlayers(playersList) {
+  const list   = document.getElementById("playerList");
+  const myPos  = positions[myId];
+
+  // Save existing mute button states
+  const existing = {};
+  list.querySelectorAll(".player-card").forEach(card => {
+    existing[card.dataset.uid] = card;
+  });
+
+  // Build new cards
+  const others = playersList.filter(p => p.robloxUserId !== myId);
+
+  if (others.length === 0) {
+    list.innerHTML = '<p class="empty">No other players connected.</p>';
+    return;
+  }
+
+  // Update or create cards
+  others.forEach(p => {
+    const uid  = p.robloxUserId;
+    positions[uid] = p.position;
+
+    const vol  = localMutes[uid] ? 0 : calcVolume(myPos, p.position);
+    const dist = calcDist(myPos, p.position);
+
+    // Update audio volume
+    const audio = document.getElementById("audio_" + uid);
+    if (audio) audio.volume = vol;
+
+    let card = list.querySelector(`[data-uid="${uid}"]`);
+    if (!card) {
+      card = document.createElement("div");
+      card.className    = "player-card";
+      card.dataset.uid  = uid;
+      card.innerHTML = `
+        <div class="player-avatar">${p.name.charAt(0).toUpperCase()}</div>
+        <div style="flex:1">
+          <div class="player-name">${p.name}${uid === myId ? '<span class="me-badge">YOU</span>' : ''}</div>
+          <div class="player-dist" id="dist_${uid}">—</div>
+          <div class="vol-bar-wrap" style="margin-top:5px">
+            <div class="vol-bar-fill" id="volbar_${uid}" style="width:0%"></div>
+          </div>
+          <div class="player-vol" id="volpct_${uid}">Vol: 0%</div>
+        </div>
+        <div class="player-actions">
+          <button class="p-btn p-btn-mute" id="pmute_${uid}"
+            onclick="toggleLocalMute('${uid}')">
+            ${localMutes[uid] ? "🔇 Muted" : "🔊 Mute"}
+          </button>
+        </div>`;
+      list.appendChild(card);
+    }
+
+    // Update distance & volume display
+    const distEl   = document.getElementById("dist_" + uid);
+    const volBar   = document.getElementById("volbar_" + uid);
+    const volPct   = document.getElementById("volpct_" + uid);
+    const pmuteBtn = document.getElementById("pmute_" + uid);
+
+    if (distEl)   distEl.textContent  = dist !== null ? `📍 ${dist} studs away` : "Distance unknown";
+    if (volBar)   volBar.style.width  = (vol * 100).toFixed(0) + "%";
+    if (volPct)   volPct.textContent  = `Vol: ${(vol * 100).toFixed(0)}%`;
+
+    if (pmuteBtn) {
+      pmuteBtn.textContent = localMutes[uid] ? "🔇 Unmute" : "🔊 Mute";
+      pmuteBtn.className   = "p-btn p-btn-mute" + (localMutes[uid] ? " on" : "");
+    }
+
+    // Connected indicator
+    card.style.opacity = p.connected ? "1" : "0.5";
+    card.title = p.connected ? "" : "Not connected to voice yet";
+  });
+
+  // Remove cards for players no longer in list
+  list.querySelectorAll(".player-card").forEach(card => {
+    const uid = card.dataset.uid;
+    if (!others.find(p => p.robloxUserId === uid)) card.remove();
+  });
+}
+
+// ── Mute local player (in our ears) ─────────────────────────
+window.toggleLocalMute = function(uid) {
+  localMutes[uid] = !localMutes[uid];
+  const audio = document.getElementById("audio_" + uid);
+  if (audio) audio.volume = localMutes[uid] ? 0 : calcVolume(positions[myId], positions[uid]);
+  renderPlayers(Object.values(connectedUsers));
+};
+
+// ── WebRTC helpers ───────────────────────────────────────────
+async function createPeer(targetId, initiator) {
+  if (peers[targetId]) return peers[targetId];
+
+  const pc = new RTCPeerConnection(ICE_SERVERS);
+  peers[targetId] = pc;
+
+  // Add local tracks
+  if (localStream) {
+    localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  }
+
+  // Receive remote audio
+  pc.ontrack = (e) => {
+    let audio = document.getElementById("audio_" + targetId);
+    if (!audio) {
+      audio = document.createElement("audio");
+      audio.id = "audio_" + targetId;
+      audio.autoplay = true;
+      document.getElementById("audioContainer").appendChild(audio);
+    }
+    audio.srcObject = e.streams[0];
+    audio.volume    = calcVolume(positions[myId], positions[targetId]);
+  };
+
+  // ICE candidates
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      socket.emit("signal", { to: targetId, type: "ice", data: e.candidate });
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    console.log(`[PEER ${targetId}] ${pc.connectionState}`);
+  };
+
+  if (initiator) {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.emit("signal", { to: targetId, type: "offer", data: offer });
+  }
+
+  return pc;
+}
+
+// ── Mic toggle ───────────────────────────────────────────────
+document.getElementById("muteBtn").addEventListener("click", () => {
+  isMuted = !isMuted;
+  if (localStream) {
+    localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+  }
+  const btn = document.getElementById("muteBtn");
+  btn.textContent = isMuted ? "🔇 Mic OFF" : "🎙 Mic ON";
+  btn.classList.toggle("active", isMuted);
+  socket.emit("mute", { muted: isMuted });
+});
+
+// ── Leave ────────────────────────────────────────────────────
+document.getElementById("leaveBtn").addEventListener("click", () => {
+  location.reload();
+});
+
+// ── Join button ──────────────────────────────────────────────
+document.getElementById("joinBtn").addEventListener("click", async () => {
+  document.getElementById("joinBtn").disabled = true;
+  document.getElementById("joinBtn").textContent = "Requesting mic...";
+
+  // 1. Get mic
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch(e) {
+    document.getElementById("permBanner").style.display = "block";
+    document.getElementById("permBanner").textContent   = "❌ Microphone denied: " + e.message;
+    document.getElementById("joinBtn").disabled = false;
+    document.getElementById("joinBtn").textContent = "Join Voice Chat";
+    return;
+  }
+
+  // 2. Connect socket
+  document.getElementById("joinBtn").textContent = "Connecting...";
+  socket = io(SERVER_URL);
+
+  socket.on("connect", () => {
+    setConnDot("green", "Connected");
+    socket.emit("join", { token });
+  });
+
+  socket.on("joined", (info) => {
+    myId    = info.robloxUserId;
+    myJobId = info.jobId;
+    myName  = info.displayName;
+    showApp();
+  });
+
+  // Position + player list updates from server
+  socket.on("positions", (playersList) => {
+    playersList.forEach(p => {
+      connectedUsers[p.robloxUserId] = p;
+      positions[p.robloxUserId]      = p.position;
+    });
+
+    renderPlayers(playersList);
+
+    // Initiate WebRTC with newly connected peers
+    playersList.forEach(p => {
+      if (p.robloxUserId !== myId && p.connected && !peers[p.robloxUserId]) {
+        // We initiate if our ID is lexicographically smaller (prevents double-offer)
+        const initiate = myId < p.robloxUserId;
+        createPeer(p.robloxUserId, initiate);
+      }
+    });
+  });
+
+  // WebRTC signaling
+  socket.on("signal", async ({ from, type, data }) => {
+    let pc = peers[from];
+
+    if (type === "offer") {
+      pc = await createPeer(from, false);
+      await pc.setRemoteDescription(new RTCSessionDescription(data));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("signal", { to: from, type: "answer", data: answer });
+
+    } else if (type === "answer") {
+      if (pc) await pc.setRemoteDescription(new RTCSessionDescription(data));
+
+    } else if (type === "ice") {
+      if (pc) await pc.addIceCandidate(new RTCIceCandidate(data));
+    }
+  });
+
+  // Remote mute events
+  socket.on("playerMute", ({ robloxUserId, muted }) => {
+    const card = document.querySelector(`[data-uid="${robloxUserId}"]`);
+    if (card) card.classList.toggle("muted-card", muted);
+  });
+
+  socket.on("error", (msg) => {
+    alert("Server error: " + msg);
+  });
+
+  socket.on("disconnect", () => {
+    setConnDot("red", "Disconnected");
+  });
+});
+
+// ── Init ─────────────────────────────────────────────────────
+if (token) loadRoomInfo();
+</script>
+</body>
+</html>
