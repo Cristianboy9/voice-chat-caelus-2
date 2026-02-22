@@ -180,6 +180,42 @@
     background: var(--blue);
   }
   .player-card.speaking::before { background: var(--green); }
+
+  /* Speaking ring animation on avatar */
+  @keyframes speakPulse {
+    0%   { box-shadow: 0 0 0 0px rgba(20,160,80,0.7); }
+    100% { box-shadow: 0 0 0 8px rgba(20,160,80,0); }
+  }
+  .player-card.speaking .player-avatar {
+    animation: speakPulse 0.6s infinite;
+    background: var(--green);
+  }
+  .speak-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--sub);
+    display: inline-block;
+    margin-left: 6px;
+    vertical-align: middle;
+    transition: background 0.1s;
+  }
+  .speak-dot.on { background: var(--green); box-shadow: 0 0 6px #14A050; }
+
+  /* Toolbar mic indicator */
+  #micLevel {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 20px;
+    margin-left: 4px;
+  }
+  #micLevel span {
+    width: 4px;
+    background: var(--cyan);
+    border-radius: 2px;
+    transition: height 0.08s;
+    min-height: 3px;
+  }
   .player-card.muted-card::before { background: var(--red); }
 
   .player-avatar {
@@ -286,6 +322,13 @@
 
   <div class="toolbar">
     <button class="toolbar-btn btn-mute" id="muteBtn">🎙 Mic ON</button>
+    <div id="micLevel" title="Your mic level">
+      <span id="ml1" style="height:3px"></span>
+      <span id="ml2" style="height:3px"></span>
+      <span id="ml3" style="height:3px"></span>
+      <span id="ml4" style="height:3px"></span>
+      <span id="ml5" style="height:3px"></span>
+    </div>
     <div class="server-info">
       Server: <strong id="infoJobId">—</strong> &nbsp;|&nbsp;
       You: <strong id="infoName">—</strong>
@@ -304,9 +347,11 @@
 <script src="https://unpkg.com/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════
-//  CONFIG  — change SERVER_URL to your Railway/Render URL
+//  CONFIG  — si el index.html está en Railway, usa "" (mismo servidor)
+//            si está en Netlify/Vercel, pon la URL de Railway completa
 // ═══════════════════════════════════════════════════════════════
-const SERVER_URL = "https://voice-chat-caelus-production.up.railway.app"; // ← CHANGE THIS
+const SERVER_URL = "https://voice-chat-caelus-production.up.railway.app"; // ← Dejar "" si index.html está en Railway
+                       // ← O poner "https://tu-app.railway.app" si está en Netlify
 
 // ── Proximity settings ───────────────────────────────────────
 const MAX_DIST  = 60;   // studs — beyond this, volume = 0
@@ -326,6 +371,93 @@ let myId        = null;
 let myJobId     = null;
 let myName      = null;
 let isMuted     = false;
+
+// ── Speaking detection ───────────────────────────────────────
+let audioCtx       = null;
+let localAnalyser  = null;
+let localDataArray = null;
+const SPEAK_THRESHOLD = 12; // 0-255, tweak if too sensitive
+
+// remote analysers: uid → { analyser, dataArray }
+const remoteAnalysers = {};
+
+function initLocalAnalyser(stream) {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = audioCtx.createMediaStreamSource(stream);
+  localAnalyser = audioCtx.createAnalyser();
+  localAnalyser.fftSize = 256;
+  localDataArray = new Uint8Array(localAnalyser.frequencyBinCount);
+  src.connect(localAnalyser);
+}
+
+function initRemoteAnalyser(uid, audioEl) {
+  if (remoteAnalysers[uid]) return;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaElementSource(audioEl);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    src.connect(analyser);
+    src.connect(audioCtx.destination); // still play audio
+    remoteAnalysers[uid] = { analyser, dataArray };
+  } catch(e) { /* already connected */ }
+}
+
+function getVolume(analyser, dataArray) {
+  analyser.getByteFrequencyData(dataArray);
+  let sum = 0;
+  for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+  return sum / dataArray.length;
+}
+
+// Run speaking detection loop
+function startSpeakingDetection() {
+  const bars = [
+    document.getElementById("ml1"), document.getElementById("ml2"),
+    document.getElementById("ml3"), document.getElementById("ml4"),
+    document.getElementById("ml5")
+  ];
+
+  function tick() {
+    requestAnimationFrame(tick);
+
+    // ── Local mic level bars ──
+    if (localAnalyser && !isMuted) {
+      const vol = getVolume(localAnalyser, localDataArray);
+      const norm = Math.min(vol / 60, 1);
+      bars.forEach((b, i) => {
+        if (!b) return;
+        const threshold = (i + 1) / bars.length;
+        b.style.height = (norm >= threshold) ? `${6 + i * 3}px` : "3px";
+        b.style.background = norm > 0.7 ? "var(--green)" : "var(--cyan)";
+      });
+
+      // Broadcast speaking state to others via socket
+      const speaking = vol > SPEAK_THRESHOLD;
+      if (socket) socket.emit("speaking", { speaking: speaking && !isMuted });
+
+      // Update own card
+      const myCard = document.querySelector(`[data-uid="${myId}"]`);
+      const myDot  = document.getElementById("sdot_" + myId);
+      if (myCard) myCard.classList.toggle("speaking", speaking && !isMuted);
+      if (myDot)  myDot.classList.toggle("on", speaking && !isMuted);
+    } else {
+      bars.forEach(b => { if (b) b.style.height = "3px"; });
+    }
+
+    // ── Remote speaking via audio element volume ──
+    for (const [uid, ra] of Object.entries(remoteAnalysers)) {
+      const vol      = getVolume(ra.analyser, ra.dataArray);
+      const speaking = vol > SPEAK_THRESHOLD;
+      const card     = document.querySelector(`[data-uid="${uid}"]`);
+      const dot      = document.getElementById("sdot_" + uid);
+      if (card) card.classList.toggle("speaking", speaking);
+      if (dot)  dot.classList.toggle("on", speaking);
+    }
+  }
+  tick();
+}
 let roomData    = null;
 
 // peerConnections[robloxUserId] = RTCPeerConnection
@@ -475,9 +607,13 @@ function renderPlayers(playersList) {
       card.className    = "player-card";
       card.dataset.uid  = uid;
       card.innerHTML = `
-        <div class="player-avatar">${p.name.charAt(0).toUpperCase()}</div>
+        <div class="player-avatar" id="avatar_${uid}">${p.name.charAt(0).toUpperCase()}</div>
         <div style="flex:1">
-          <div class="player-name">${p.name}${uid === myId ? '<span class="me-badge">YOU</span>' : ''}</div>
+          <div class="player-name">
+            ${p.name}
+            ${uid === myId ? '<span class="me-badge">YOU</span>' : ''}
+            <span class="speak-dot" id="sdot_${uid}" title="Speaking"></span>
+          </div>
           <div class="player-dist" id="dist_${uid}">—</div>
           <div class="vol-bar-wrap" style="margin-top:5px">
             <div class="vol-bar-fill" id="volbar_${uid}" style="width:0%"></div>
@@ -562,6 +698,8 @@ async function createPeer(targetId, initiator) {
     audio.volume    = calcVolume(positions[myId], positions[targetId]);
     // Force play in case autoplay was blocked
     audio.play().catch(err => console.warn("Audio play blocked:", err));
+    // Init speaking analyser for this remote peer
+    initRemoteAnalyser(targetId, audio);
   };
 
   // ICE candidates
@@ -641,6 +779,8 @@ document.getElementById("joinBtn").addEventListener("click", async () => {
   // 1. Get mic
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    initLocalAnalyser(localStream);
+    startSpeakingDetection();
   } catch(e) {
     document.getElementById("permBanner").style.display = "block";
     document.getElementById("permBanner").textContent   = "❌ Microphone denied: " + e.message;
@@ -718,6 +858,21 @@ document.getElementById("joinBtn").addEventListener("click", async () => {
   socket.on("playerMute", ({ robloxUserId, muted }) => {
     const card = document.querySelector(`[data-uid="${robloxUserId}"]`);
     if (card) card.classList.toggle("muted-card", muted);
+    if (muted) {
+      const card2 = document.querySelector(`[data-uid="${robloxUserId}"]`);
+      const dot   = document.getElementById("sdot_" + robloxUserId);
+      if (card2) card2.classList.remove("speaking");
+      if (dot)   dot.classList.remove("on");
+    }
+  });
+
+  // Remote speaking events (fallback for when analyser isn't available)
+  socket.on("playerSpeaking", ({ robloxUserId, speaking }) => {
+    if (remoteAnalysers[robloxUserId]) return; // already using local analyser
+    const card = document.querySelector(`[data-uid="${robloxUserId}"]`);
+    const dot  = document.getElementById("sdot_" + robloxUserId);
+    if (card) card.classList.toggle("speaking", speaking);
+    if (dot)  dot.classList.toggle("on", speaking);
   });
 
   socket.on("error", (msg) => {
